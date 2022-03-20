@@ -8,6 +8,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using WebApplication1.Model;
+using WebApplication1.Model.DTOs;
+using WebApplication1.Model.ViewModel;
 
 namespace WebApplication1.Controllers
 {
@@ -15,17 +18,19 @@ namespace WebApplication1.Controllers
     [ApiController]
     public class CaseController : ControllerBase
     {
+        private readonly IElasticClient _elasticClient;
+
+        public CaseController(IElasticClient elasticClient)
+        {
+            _elasticClient = elasticClient;
+        }
+
         [HttpGet]
         [Route("Search")]
         public async Task<IActionResult> Search(string searchKey)
         {
-            //var settings = new ConnectionSettings(new Uri("http://host.docker.internal:9200/")).DefaultIndex("esblogdb");
-            var settings = new ConnectionSettings(new Uri("http://localhost:9200/")).DefaultIndex("esblogdb");
-            var client = new ElasticClient(settings);
-            var createIndex = await client.Indices.CreateAsync("esblogdb", c => c.Map<Blog>(m => m.AutoMap()));
-
-            var searchAllResponse = await client.SearchAsync<Blog>(s => s
-             .Index("esblogdb")
+            var searchAllResponse = await _elasticClient.SearchAsync<Blog>(s => s
+             .Index("esblogdb9")
              .From(0)
              .Query(q => q
              .MultiMatch(m => m
@@ -38,10 +43,10 @@ namespace WebApplication1.Controllers
 
             var result = searchAllResponse.Documents;
 
-            List<BlogView> model = new List<BlogView>();
+            List<BlogViewModel> model = new List<BlogViewModel>();
             foreach (var item in result)
             {
-                var blog = new BlogView()
+                var blog = new BlogViewModel()
                 {
                     BlogTitle = item.BlogTitle,
                     BlogText = item.BlogText,
@@ -56,16 +61,8 @@ namespace WebApplication1.Controllers
         [Route("PostBlog")]
         public async Task<IActionResult> PostBlog(BlogDTO blog)
         {
-            //var settings = new ConnectionSettings(new Uri("http://host.docker.internal:9200/")).DefaultIndex("esblogdb");
-            var settings = new ConnectionSettings(new Uri("http://localhost:9200/")).DefaultIndex("esblogdb");
-            var client = new ElasticClient(settings);
-            var createIndex = await client.Indices.CreateAsync("esblogdb", c => c.Map<Blog>(m => m.AutoMap()));
-
-            if(blog.Suggest.Count == 0 || blog.Suggest == null )
-            {
-                blog.Suggest.Add(blog.BlogTitle);
-                blog.Suggest.Add(blog.BlogText);
-            }
+      
+            
             Guid blogId = Guid.NewGuid();
             var model = new Blog
             {
@@ -74,11 +71,11 @@ namespace WebApplication1.Controllers
                 BlogTitle = blog.BlogTitle,
                 Suggest = new CompletionField
                 {
-                    Input = blog.Suggest
+                    Input = blog.BlogText.Split(" ").ToList()
                 },
             };
 
-            var result = await client.IndexDocumentAsync(model);
+            var result = await _elasticClient.IndexDocumentAsync(model);
             if(result.IsValid)
             {
                 return Ok("Success");
@@ -91,32 +88,26 @@ namespace WebApplication1.Controllers
         [Route("AutoComplete")]
         public async Task<IActionResult> AutoComplete(string searchKey)
         {
-            //var settings = new ConnectionSettings(new Uri("http://host.docker.internal:9200/")).DefaultIndex("esblogdb");
-            var settings = new ConnectionSettings(new Uri("http://localhost:9200/")).DefaultIndex("esblogdb");
-            var client = new ElasticClient(settings);
-
-            var createIndex = await client.Indices.CreateAsync("esblogdb", c => c.Map<Blog>(m => m.AutoMap().Properties(ps => ps.Completion(c => c.Name(p => p.Suggest)))));
-
-            var searchResponse = await client.SearchAsync<Blog>(s => s
-                                     .Index("esblogdb")
+            
+            var searchResponse = await _elasticClient.SearchAsync<Blog>(s => s
+                                     .Index("esblogdb9")
                                      .Suggest(su => su
                                           .Completion("suggestions", c => c
                                                .Field(f => f.Suggest)
                                                .Prefix(searchKey)
+                                               .Size(5)
                                                .Fuzzy(f => f
-                                                   .Fuzziness(Fuzziness.Auto)
-                                               ))
+                                                  .Fuzziness(Fuzziness.Auto)
+                                                ))
                                              ));
-
 
             var suggests = from suggest in searchResponse.Suggest["suggestions"]
                            from option in suggest.Options
-                           select new BlogView
+                           select new
                            {
-                               BlogTitle = option.Source.BlogTitle,
-                               BlogText = option.Source.BlogText,
+                                option.Text
                            };
-            
+                           
             return Ok(suggests);
         }
 
@@ -124,24 +115,4 @@ namespace WebApplication1.Controllers
 }
 
 
-public class Blog
-{
-    [System.Text.Json.Serialization.JsonIgnore]
-    public string BlogId { get; set; }
-    public string BlogTitle { get; set; }
-    public string BlogText { get; set; }
-    public CompletionField Suggest { get; set; }
-}
 
-public class BlogDTO
-{
-    public string BlogTitle { get; set; }
-    public string BlogText { get; set; }
-    public List<string> Suggest { get; set; }
-}
-
-public class BlogView
-{
-    public string BlogTitle { get; set; }
-    public string BlogText { get; set; }
-}

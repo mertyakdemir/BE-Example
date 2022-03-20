@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using WebApplication1.Model;
 
 namespace WebApplication1
 {
@@ -27,7 +28,11 @@ namespace WebApplication1
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddSingleton<IElasticClient>(new ElasticClient());
+            var settings = new ConnectionSettings(new Uri(Configuration.GetConnectionString("DefaultConnection"))).DefaultIndex("esblogdb9");
+            var client = new ElasticClient(settings);
+            var createIndex = client.Indices.CreateAsync("esblogdb9", c => c.Map<Blog>(m => m.AutoMap().Properties(ps => ps.Completion(c => c.Name(p => p.Suggest)))));
+            services.AddSingleton<IElasticClient>(new ElasticClient(settings));
+
             services.AddControllers();
             services.AddSwaggerGen(c =>
             {
